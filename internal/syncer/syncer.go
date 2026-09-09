@@ -19,10 +19,6 @@ type Syncer struct {
 	domainFilters []string
 	identifier    string
 	dryRun        bool
-	// cached/normalized helpers for performance and to avoid repeated work
-	txtPrefix   string
-	expectedTXT string
-	normFilters []string
 }
 
 func NewSyncer(
@@ -36,12 +32,6 @@ func NewSyncer(
 	if identifier == "" {
 		identifier = "docker-traefik-dns"
 	}
-	// normalize domain filters for faster comparisons
-	nf := make([]string, 0, len(domainFilters))
-	for _, f := range domainFilters {
-		nf = append(nf, strings.ToLower(strings.TrimSuffix(f, ".")))
-	}
-
 	return &Syncer{
 		source:        src,
 		provider:      prov,
@@ -49,9 +39,6 @@ func NewSyncer(
 		domainFilters: domainFilters,
 		identifier:    identifier,
 		dryRun:        dryRun,
-		txtPrefix:     strings.ToLower("TXT-ext-dns-"),
-		expectedTXT:   fmt.Sprintf("heritage=docker-traefik-dns,owner=%s", identifier),
-		normFilters:   nf,
 	}
 }
 
@@ -80,15 +67,6 @@ func (s *Syncer) matchesFilter(domain string) bool {
 		return true
 	}
 	domain = strings.ToLower(strings.TrimSuffix(domain, "."))
-	// use pre-normalized filters if available
-	if len(s.normFilters) > 0 {
-		for _, f := range s.normFilters {
-			if domain == f || strings.HasSuffix(domain, "."+f) {
-				return true
-			}
-		}
-		return false
-	}
 	for _, f := range s.domainFilters {
 		f = strings.ToLower(strings.TrimSuffix(f, "."))
 		if domain == f || strings.HasSuffix(domain, "."+f) {
@@ -141,24 +119,19 @@ func (s *Syncer) Sync(ctx context.Context) {
 	existingMap := make(map[string]*models.Record)     // key -> record
 	txtOwnershipMap := make(map[string]*models.Record) // target domain -> TXT record
 
-	// use cached prefix/expected values
+	txtPrefix := "TXT-ext-dns-"
+	expectedTXT := s.expectedTXTValue()
+
 	for _, r := range existing {
-		if r == nil {
-			continue
-		}
-		name := strings.ToLower(strings.TrimSuffix(r.Name, "."))
+		r.Name = strings.ToLower(strings.TrimSuffix(r.Name, "."))
 		if r.Type == models.TypeTXT {
-			if strings.HasPrefix(name, s.txtPrefix) {
-				domain := strings.TrimPrefix(name, s.txtPrefix)
-				rr := *r
-				rr.Name = name
-				txtOwnershipMap[domain] = &rr
+			if strings.HasPrefix(r.Name, txtPrefix) {
+				domain := strings.TrimPrefix(r.Name, txtPrefix)
+				txtOwnershipMap[domain] = r
 			}
 		} else {
-			key := fmt.Sprintf("%s:%s", name, r.Type)
-			rr := *r
-			rr.Name = name
-			existingMap[key] = &rr
+			key := fmt.Sprintf("%s:%s", r.Name, r.Type)
+			existingMap[key] = r
 		}
 	}
 
@@ -167,29 +140,22 @@ func (s *Syncer) Sync(ctx context.Context) {
 	var toUpdate []*models.Record
 	var toDelete []*models.Record
 
-	// Check for creates and updates (avoid mutating input records: use copies)
+	// Check for creates and updates
 	for _, d := range filteredDesired {
-		if d == nil {
-			continue
-		}
 		key := fmt.Sprintf("%s:%s", d.Name, d.Type)
 		ex, exists := existingMap[key]
 
 		if !exists {
 			// Record doesn't exist, create it
-			rr := *d
-			rr.Name = strings.ToLower(strings.TrimSuffix(d.Name, "."))
-			toCreate = append(toCreate, &rr)
+			toCreate = append(toCreate, d)
 		} else {
 			// Record exists, check if owned by our syncer
 			txt, isOwned := txtOwnershipMap[d.Name]
-			if isOwned && txt.Target == s.expectedTXT {
+			if isOwned && txt.Target == expectedTXT {
 				// Check if update is needed
 				if ex.Target != d.Target || ex.Proxy != d.Proxy {
-					rr := *d
-					rr.ID = ex.ID
-					rr.Name = d.Name
-					toUpdate = append(toUpdate, &rr)
+					d.ID = ex.ID
+					toUpdate = append(toUpdate, d)
 				}
 			} else {
 				slog.Warn("Skipping unmanaged DNS record (missing or mismatched TXT owner)",
@@ -203,8 +169,8 @@ func (s *Syncer) Sync(ctx context.Context) {
 		if _, needed := desiredMap[key]; !needed {
 			// Domain is no longer needed
 			if s.matchesFilter(ex.Name) {
-				txt, isOwned := txtOwnershipMap[strings.ToLower(strings.TrimSuffix(ex.Name, "."))]
-				if isOwned && txt.Target == s.expectedTXT {
+				txt, isOwned := txtOwnershipMap[ex.Name]
+				if isOwned && txt.Target == expectedTXT {
 					toDelete = append(toDelete, ex)
 				}
 			}
@@ -286,15 +252,14 @@ func ComputeActions(filteredDesired []*models.Record, existing []*models.Record,
 	txtOwnershipMap := make(map[string]*models.Record)
 
 	txtPrefix := "TXT-ext-dns-"
-	if identifier == "" {
-		identifier = "docker-traefik-dns"
-	}
-	expectedTXT := fmt.Sprintf("heritage=docker-traefik-dns,owner=%s", identifier)
+	expectedTXT := func() string {
+		if identifier == "" {
+			identifier = "docker-traefik-dns"
+		}
+		return fmt.Sprintf("heritage=docker-traefik-dns,owner=%s", identifier)
+	}()
 
 	for _, r := range existing {
-		if r == nil {
-			continue
-		}
 		name := strings.ToLower(strings.TrimSuffix(r.Name, "."))
 		if r.Type == models.TypeTXT {
 			if strings.HasPrefix(name, strings.ToLower(txtPrefix)) {
@@ -321,25 +286,8 @@ func ComputeActions(filteredDesired []*models.Record, existing []*models.Record,
 		return false
 	}
 
-	// Build desired key set for delete checks
-	desiredKeys := make(map[string]struct{})
-	for _, dd := range filteredDesired {
-		if dd == nil {
-			continue
-		}
-		name := strings.ToLower(strings.TrimSuffix(dd.Name, "."))
-		if !matchesFilter(name) {
-			continue
-		}
-		k := fmt.Sprintf("%s:%s", name, dd.Type)
-		desiredKeys[k] = struct{}{}
-	}
-
 	// Check for creates and updates
 	for _, d := range filteredDesired {
-		if d == nil {
-			continue
-		}
 		d.Name = strings.ToLower(strings.TrimSuffix(d.Name, "."))
 		if !matchesFilter(d.Name) {
 			continue
@@ -359,6 +307,13 @@ func ComputeActions(filteredDesired []*models.Record, existing []*models.Record,
 				toUpdate = append(toUpdate, d)
 			}
 		}
+	}
+
+	// Build desired key set
+	desiredKeys := make(map[string]struct{})
+	for _, dd := range filteredDesired {
+		k := fmt.Sprintf("%s:%s", strings.ToLower(strings.TrimSuffix(dd.Name, ".")), dd.Type)
+		desiredKeys[k] = struct{}{}
 	}
 
 	// Check for deletes
