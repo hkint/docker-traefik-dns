@@ -1,0 +1,13 @@
+.git
+.gitignore
+.github
+Dockerfile*
+README*
+*.md
+
+tmp/
+dist/
+bin/
+
+.env
+.env.*

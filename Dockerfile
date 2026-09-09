@@ -1,24 +1,41 @@
-# Build Stage
-FROM golang:1-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS builder
 
-WORKDIR /app
+WORKDIR /src
 
-COPY go.mod ./
-RUN go mod download || true
+ARG TARGETOS
+ARG TARGETARCH
+
+ENV CGO_ENABLED=0 \
+    GOOS=$TARGETOS \
+    GOARCH=$TARGETARCH
+
+COPY go.mod go.sum ./
+
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
 
 COPY . .
 
-# Compile optimized static binary
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /app/docker-traefik-dns ./cmd/docker-traefik-dns
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go build \
+      -trimpath \
+      -buildvcs=false \
+      -ldflags="-s -w" \
+      -o /out/docker-traefik-dns \
+      ./cmd/docker-traefik-dns
 
-FROM alpine:3
+FROM scratch
 
-WORKDIR /app
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt \
+    /etc/ssl/certs/ca-certificates.crt
 
-RUN apk --no-cache add ca-certificates tzdata
+COPY --from=builder /usr/share/zoneinfo \
+    /usr/share/zoneinfo
 
-COPY --from=builder /app/docker-traefik-dns /app/docker-traefik-dns
+COPY --from=builder /out/docker-traefik-dns \
+    /docker-traefik-dns
 
 USER 1000:1000
 
-ENTRYPOINT ["/app/docker-traefik-dns"]
+ENTRYPOINT ["/docker-traefik-dns"]
