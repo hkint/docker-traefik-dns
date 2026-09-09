@@ -11,9 +11,6 @@ build:
 test:
 	go test ./... -v
 
-test-python:
-	python -m unittest discover -v tests
-
 fmt:
 	gofmt -s -w .
 

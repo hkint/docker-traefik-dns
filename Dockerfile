@@ -27,12 +27,6 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 
 FROM scratch
 
-COPY --from=builder /etc/ssl/certs/ca-certificates.crt \
-    /etc/ssl/certs/ca-certificates.crt
-
-COPY --from=builder /usr/share/zoneinfo \
-    /usr/share/zoneinfo
-
 COPY --from=builder /out/docker-traefik-dns \
     /docker-traefik-dns
 
