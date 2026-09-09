@@ -1,0 +1,38 @@
+services:
+  external-dns:
+    build: .
+    image: docker-traefik-dns:latest
+    container_name: docker-traefik-dns
+    restart: unless-stopped
+    environment:
+      # Cloudflare Configuration
+      - CF_API_TOKEN=${CF_API_TOKEN}
+      - CF_PROXY=${CF_PROXY:-false}
+      - CF_TTL=${CF_TTL:-1}
+      - DOMAIN_FILTER=${DOMAIN_FILTER:-example.com}
+
+      # Source configuration: "both" (default), "docker", or "traefik"
+      - DNS_SOURCE=both
+
+      # Default Target IP (Your public IP or server LAN IP)
+      - DEFAULT_TARGET_IP=${DEFAULT_TARGET_IP}
+
+      # Docker Socket connection (reads container labels and Traefik rules directly)
+      - DOCKER_HOST=unix:///var/run/docker.sock
+
+      # Traefik API endpoint (optional if reading directly via docker socket)
+      # - TRAEFIK_API_URL=http://traefik:8080
+      # - TRAEFIK_TARGET_IP=${DEFAULT_TARGET_IP}
+
+      # Operational settings
+      - SYNC_INTERVAL=60s
+      - DRY_RUN=false
+      - LOG_LEVEL=info
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - traefik-net
+
+networks:
+  traefik-net:
+    external: true
