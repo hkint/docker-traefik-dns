@@ -155,3 +155,20 @@ So the design is intentionally hybrid: it supports standalone Docker operation w
 ## License / 许可证
 
 MIT
+
+## Tests / 测试
+
+Run Go unit tests:
+
+```bash
+make test
+```
+
+Run the existing Python simulation/unit tests (they exercise the reconciliation logic in Python, not the compiled Go binary):
+
+```bash
+make test-python
+# Or: python -m unittest discover -v tests
+```
+
+In CI the Python tests are executed as part of the `CI` workflow.
