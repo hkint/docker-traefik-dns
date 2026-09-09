@@ -113,6 +113,45 @@ This prevents accidental deletion of manually managed DNS records.
 - `DNS_SOURCE` supports `docker`, `traefik`, or `both` / `DNS_SOURCE` 支持 `docker`、`traefik`、`both`
 - `DRY_RUN=true` is useful before enabling automatic updates / 在开启自动更新前，可先用 `DRY_RUN=true` 验证
 
+## Label compatibility / 标签兼容性
+
+When running with Docker socket access, this project is designed to work in a standalone Docker environment, but it does not abandon standard Traefik semantics.
+
+在使用 Docker socket 运行时，本项目设计为可独立在 Docker 环境中工作，但它并不会放弃标准 Traefik 语义。
+
+Supported inputs / 支持的输入：
+
+- Standard Traefik labels / 标准 Traefik 标签
+  - `traefik.http.routers.*.rule`
+  - `traefik.tcp.routers.*.rule`
+- Custom Docker labels / 自定义 Docker 标签
+  - `docker-traefik-dns.hostname`
+  - `docker-traefik-dns.target`
+  - `docker-traefik-dns.proxy`
+- Compatibility labels / 兼容标签
+  - `external-dns.alpha.kubernetes.io/hostname`
+  - `external-dns.alpha.kubernetes.io/target`
+  - `external-dns.alpha.kubernetes.io/cloudflare-proxied`
+
+### Precedence / 优先级
+
+For target and proxy values, the project prefers explicit custom labels first, then compatibility labels, then the global fallback values.
+
+对于 `target` 和 `proxy` 值，本项目优先使用显式的自定义标签，然后是兼容标签，最后回退到全局默认值。
+
+That means:
+
+- `docker-traefik-dns.target` > `external-dns.alpha.kubernetes.io/target` > `DEFAULT_TARGET_IP`
+- `docker-traefik-dns.proxy` > `external-dns.alpha.kubernetes.io/cloudflare-proxied` > `CF_PROXY`
+
+For hostnames, both standard Traefik router rules and explicit hostname labels are accepted and merged together.
+
+对于域名解析，标准 Traefik 路由规则和显式 hostname 标签都会被接受，并合并去重。
+
+So the design is intentionally hybrid: it supports standalone Docker operation while remaining compatible with the Traefik ecosystem.
+
+因此，这个设计是混合型的：既适合独立 Docker 运行，也兼容 Traefik 标准生态。
+
 ## License / 许可证
 
 MIT
