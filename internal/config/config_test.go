@@ -9,8 +9,8 @@ func TestLoadConfigDefaults(t *testing.T) {
 	os.Clearenv()
 	cfg := LoadConfig()
 
-	if cfg.Identifier != "docker-external-dns" {
-		t.Errorf("expected default identifier docker-external-dns, got %s", cfg.Identifier)
+	if cfg.Identifier != "docker-traefik-dns" {
+		t.Errorf("expected default identifier docker-traefik-dns, got %s", cfg.Identifier)
 	}
 	if cfg.IntervalSeconds != 60 {
 		t.Errorf("expected default interval 60s, got %d", cfg.IntervalSeconds)

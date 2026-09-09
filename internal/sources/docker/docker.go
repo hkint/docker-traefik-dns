@@ -4,15 +4,13 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"net"
 	"os"
 	"strconv"
 	"strings"
 
+	"docker-traefik-dns/internal/dnsutil"
 	"docker-traefik-dns/internal/models"
-	"docker-traefik-dns/internal/sources/traefik"
 
-	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 )
@@ -73,17 +71,6 @@ func (s *DockerSource) Initialize(ctx context.Context) error {
 	return nil
 }
 
-func determineRecordType(target string) models.RecordType {
-	ip := net.ParseIP(target)
-	if ip != nil {
-		if ip.To4() != nil {
-			return models.TypeA
-		}
-		return models.TypeAAAA
-	}
-	return models.TypeCNAME
-}
-
 func (s *DockerSource) GetRecords(ctx context.Context) ([]*models.Record, error) {
 	var allRecords []*models.Record
 	seen := make(map[string]bool)
@@ -134,7 +121,7 @@ func (s *DockerSource) GetRecords(ctx context.Context) ([]*models.Record, error)
 			for k, v := range labels {
 				if (strings.HasPrefix(k, "traefik.http.routers.") || strings.HasPrefix(k, "traefik.tcp.routers.")) &&
 					strings.HasSuffix(k, ".rule") {
-					hosts := traefik.ExtractHosts(v)
+					hosts := dnsutil.ExtractHosts(v)
 					for _, h := range hosts {
 						discoveredHosts[h] = true
 					}
@@ -160,7 +147,7 @@ func (s *DockerSource) GetRecords(ctx context.Context) ([]*models.Record, error)
 			}
 
 			// 5. Build records
-			rtype := determineRecordType(target)
+			rtype := dnsutil.DetermineRecordType(target)
 			for h := range discoveredHosts {
 				key := fmt.Sprintf("%s:%s", h, rtype)
 				if !seen[key] {

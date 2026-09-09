@@ -6,12 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"net"
 	"net/http"
-	"regexp"
 	"strings"
 
 	"docker-traefik-dns/internal/config"
+	"docker-traefik-dns/internal/dnsutil"
 	"docker-traefik-dns/internal/models"
 )
 
@@ -75,55 +74,6 @@ func (s *TraefikSource) Initialize(ctx context.Context) error {
 	return nil
 }
 
-type Router struct {
-	Rule   string `json:"rule"`
-	Status string `json:"status"`
-}
-
-// Regex to extract Host(...) or HostSNI(...) clauses
-var hostClauseRegex = regexp.MustCompile(`(?i)Host(?:SNI)?\(([^)]+)\)`)
-var hostValueRegex = regexp.MustCompile("`([^`]+)`|\"([^\"]+)\"|'([^']+)'")
-
-func ExtractHosts(rule string) []string {
-	var hosts []string
-	seen := make(map[string]bool)
-
-	matches := hostClauseRegex.FindAllStringSubmatch(rule, -1)
-	for _, match := range matches {
-		if len(match) > 1 {
-			inner := match[1]
-			valMatches := hostValueRegex.FindAllStringSubmatch(inner, -1)
-			for _, vm := range valMatches {
-				var host string
-				if vm[1] != "" {
-					host = vm[1]
-				} else if vm[2] != "" {
-					host = vm[2]
-				} else if vm[3] != "" {
-					host = vm[3]
-				}
-				host = strings.ToLower(strings.TrimSpace(host))
-				if host != "" && !seen[host] {
-					seen[host] = true
-					hosts = append(hosts, host)
-				}
-			}
-		}
-	}
-	return hosts
-}
-
-func DetermineRecordType(target string) models.RecordType {
-	ip := net.ParseIP(target)
-	if ip != nil {
-		if ip.To4() != nil {
-			return models.TypeA
-		}
-		return models.TypeAAAA
-	}
-	return models.TypeCNAME
-}
-
 func (s *TraefikSource) GetRecords(ctx context.Context) ([]*models.Record, error) {
 	var allRecords []*models.Record
 	seen := make(map[string]bool)
@@ -183,4 +133,17 @@ func (s *TraefikSource) GetRecords(ctx context.Context) ([]*models.Record, error
 	}
 
 	return allRecords, nil
+}
+
+type Router struct {
+	Rule   string `json:"rule"`
+	Status string `json:"status"`
+}
+
+func ExtractHosts(rule string) []string {
+	return dnsutil.ExtractHosts(rule)
+}
+
+func DetermineRecordType(target string) models.RecordType {
+	return dnsutil.DetermineRecordType(target)
 }

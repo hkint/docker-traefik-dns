@@ -74,7 +74,7 @@ func LoadConfig() *Config {
 		CFApiEmail:      getEnv("CF_API_EMAIL", ""),
 		CFProxy:         getEnvBool("CF_PROXY", false),
 		CFTTL:           getEnvInt("CF_TTL", 1),
-		Identifier:      getEnv("IDENTIFIER", "docker-external-dns"),
+		Identifier:      getEnv("IDENTIFIER", "docker-traefik-dns"),
 		DryRun:          getEnvBool("DRY_RUN", false),
 		LogLevel:        getEnv("LOG_LEVEL", "info"),
 	}

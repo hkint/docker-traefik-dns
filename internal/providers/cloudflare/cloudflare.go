@@ -135,6 +135,10 @@ func (p *CloudflareProvider) GetRecords(ctx context.Context) ([]*models.Record, 
 			if r.Proxied != nil {
 				proxy = *r.Proxied
 			}
+			priority := uint16(0)
+			if r.Priority != nil {
+				priority = *r.Priority
+			}
 			allRecords = append(allRecords, &models.Record{
 				ID:       r.ID,
 				Type:     models.RecordType(r.Type),
@@ -142,7 +146,7 @@ func (p *CloudflareProvider) GetRecords(ctx context.Context) ([]*models.Record, 
 				Target:   r.Content,
 				TTL:      r.TTL,
 				Proxy:    proxy,
-				Priority: uint16(r.Priority),
+				Priority: priority,
 			})
 		}
 	}

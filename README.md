@@ -1,101 +1,118 @@
 # docker-traefik-dns
 
-A lightweight, dedicated dynamic DNS automation service tailored for self-hosted Docker stacks and homelabs. It automatically detects `Host` domain rules configured on **Traefik** routers or **Docker container labels**, and creates / updates corresponding DNS records on **Cloudflare**.
+A lightweight dynamic DNS sync service for Docker and Traefik environments.
 
----
+Docker + Traefik + Cloudflare 的轻量动态 DNS 同步服务。
 
-## 🚀 Key Features & Modifications
+## Overview / 概览
 
-1. **Lightweight & Self-Hosted Focused**:
-   - Stripped away unnecessary providers (e.g. Pi-hole), leaving a clean, hyper-focused, low-resource Cloudflare DNS engine.
-   - Memory footprint < 15MB RAM; Docker image size ~15MB.
-2. **Dual Host Discovery**:
-   - **Direct Docker Socket Inspection**: Automatically reads Traefik labels (`traefik.http.routers.<name>.rule=Host(...)`) and standard external-dns labels directly from `/var/run/docker.sock`. You do not even need Traefik API exposed!
-   - **Traefik API Provider**: Can also connect directly to local or remote Traefik endpoints (`/api/http/routers` and `/api/tcp/routers`).
-   - Supports robust rule parsing: backticks, single/double quotes, multiple comma-separated hosts, `HostSNI`, and compound expressions (`||`, `&&`).
-3. **Safe Cloudflare Synchronization**:
-   - Uses TXT ownership records (`heritage=docker-traefik-dns,owner=<identifier>`) to guarantee it **never overwrites or deletes existing manual DNS records** in your Cloudflare account.
-   - Auto-detects DNS record types (`A` for IPv4, `AAAA` for IPv6, `CNAME` for hostnames).
-   - Zone auto-discovery with longest-suffix matching.
-   - Supports Cloudflare Proxy toggle (`CF_PROXY`) globally and per-container override.
+This project discovers hostnames from Docker labels or Traefik router rules and reconciles them to Cloudflare DNS records.
 
----
+本项目会从 Docker 标签或 Traefik 路由规则中发现域名，并同步到 Cloudflare DNS 记录中。
 
-## 🛠️ Configuration Options
+## Features / 功能
 
-| Environment Variable | Default                       | Description                                                                  |
-| :------------------- | :---------------------------- | :--------------------------------------------------------------------------- |
-| `CF_API_TOKEN`       | _Required_                    | Cloudflare API Token (requires `Zone.DNS` edit permissions)                  |
-| `DEFAULT_TARGET_IP`  | -                             | Default IP address (WAN or LAN) to point domain records to                   |
-| `DOMAIN_FILTER`      | -                             | Comma-separated list of domains to manage (e.g. `example.com,homelab.org`)   |
-| `DNS_SOURCE`         | `both`                        | Source of hostnames: `both` (default), `docker`, or `traefik`                |
-| `CF_PROXY`           | `false`                       | Enable Cloudflare CDN proxy (orange cloud) by default                        |
-| `CF_TTL`             | `1`                           | DNS TTL in seconds (`1` for Cloudflare Automatic)                            |
-| `SYNC_INTERVAL`      | `60s`                         | Polling and reconciliation interval                                          |
-| `DRY_RUN`            | `false`                       | If `true`, logs planned operations without making API calls                  |
-| `IDENTIFIER`         | `docker-traefik-dns`          | Unique owner ID used in TXT ownership verification                           |
-| `LOG_LEVEL`          | `info`                        | Logging verbosity (`debug`, `info`, `warn`, `error`)                         |
-| `DOCKER_HOST`        | `unix:///var/run/docker.sock` | Docker socket path or TCP address                                            |
-| `TRAEFIK_API_URL`    | -                             | Traefik API base URL (e.g. `http://traefik:8080`)                            |
-| `TRAEFIK_TARGET_IP`  | -                             | Target IP specific to Traefik API routes (falls back to `DEFAULT_TARGET_IP`) |
+- Detect hostnames from Docker and Traefik / 从 Docker 和 Traefik 发现域名
+- Parse `Host(...)` and `HostSNI(...)` / 解析 `Host(...)` 和 `HostSNI(...)`
+- Auto-detect `A`, `AAAA`, and `CNAME` / 自动识别 `A`、`AAAA` 和 `CNAME`
+- Filter by domain allow-list / 可按域名白名单过滤
+- Keep ownership using TXT records / 使用 TXT 记录保存所有权
+- Run on a reconciliation loop / 以定时同步循环运行
+- Dry-run support / 支持 dry-run 模式
 
----
+## How it works / 工作原理
 
-## 📦 Quick Start with Docker Compose
+1. Read config from environment variables / 从环境变量读取配置
+2. Discover desired records from Docker or Traefik / 从 Docker 或 Traefik 发现目标记录
+3. Normalize and deduplicate hostnames / 规范化并去重域名
+4. Query Cloudflare zones and existing records / 查询 Cloudflare zone 和现有记录
+5. Reconcile only managed records / 仅同步本服务管理的记录
+6. Repeat on a fixed interval / 按固定间隔循环执行
 
-### 1. Create `.env` file
+## Configuration / 配置
+
+| Variable / 变量     | Default / 默认值              | Description / 说明                                         |
+| ------------------- | ----------------------------- | ---------------------------------------------------------- |
+| `CF_API_TOKEN`      | required / 必填               | Cloudflare API token                                       |
+| `CF_API_KEY`        | -                             | Cloudflare API key                                         |
+| `CF_API_EMAIL`      | -                             | Cloudflare email for key auth                              |
+| `DOMAIN_FILTER`     | -                             | Comma-separated allowed domains / 域名白名单               |
+| `DEFAULT_TARGET_IP` | -                             | Default record target / 默认记录目标                       |
+| `DNS_SOURCE`        | `both`                        | `docker`, `traefik`, or `both`                             |
+| `CF_PROXY`          | `false`                       | Enable Cloudflare proxy / 是否开启代理                     |
+| `CF_TTL`            | `1`                           | DNS TTL                                                    |
+| `SYNC_INTERVAL`     | `60s`                         | Reconcile interval / 同步间隔                              |
+| `DRY_RUN`           | `false`                       | Log actions without applying them / 仅打印不执行           |
+| `IDENTIFIER`        | `docker-traefik-dns`          | TXT ownership identifier / TXT 所有权标识                  |
+| `LOG_LEVEL`         | `info`                        | `debug`, `info`, `warn`, `error`                           |
+| `DOCKER_HOST`       | `unix:///var/run/docker.sock` | Docker socket or host / Docker socket 或地址               |
+| `TRAEFIK_API_URL`   | -                             | Traefik API base URL / Traefik API 地址                    |
+| `TRAEFIK_TARGET_IP` | -                             | Fallback target for Traefik records / Traefik 记录回退目标 |
+
+## Quick start / 快速开始
+
+Create `.env` and run with Docker Compose.
+
+创建 `.env` 并使用 Docker Compose 启动。
 
 ```bash
-CF_API_TOKEN=your_cloudflare_api_token_here
+CF_API_TOKEN=your_cloudflare_token
 DOMAIN_FILTER=example.com
-DEFAULT_TARGET_IP=1.2.3.4
+DEFAULT_TARGET_IP=100.0.0.1
 CF_PROXY=false
 ```
 
-### 2. Run with Docker Compose
-
 ```yaml
 services:
-  external-dns:
-    image: docker-traefik-dns:latest
+  docker-traefik-dns:
     build: .
     container_name: docker-traefik-dns
     restart: unless-stopped
     env_file: .env
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-    networks:
-      - traefik-net
-
-networks:
-  traefik-net
-    driver: bridge
 ```
 
-### 3. Container Label Examples
+## Examples / 示例
 
-#### Any Service with Traefik:
+### Traefik rule / Traefik 路由规则
 
 ```yaml
-services:
-  whoami:
-    image: traefik/whoami
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.whoami.rule=Host(`whoami.example.com`)"
+labels:
+  - "traefik.enable=true"
+  - "traefik.http.routers.app.rule=Host(`app.example.com`)"
 ```
 
-`docker-traefik-dns` automatically detects `whoami.example.com` and creates an A record pointing to `DEFAULT_TARGET_IP` on Cloudflare!
+This is automatically picked up and converted into DNS.
 
-#### Overriding IP or Cloudflare Proxy per-container:
+这会被自动识别并转换为 DNS 记录。
+
+### Explicit hostname override / 显式主机名覆盖
 
 ```yaml
-services:
-  my-app:
-    image: my-app:latest
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.app.rule=Host(`app.example.com`)"
-      - "docker-traefik-dns.target=192.168.1.50"
-      - "docker-traefik-dns.proxy=true"
+labels:
+  - "docker-traefik-dns.hostname=demo.example.com"
+  - "docker-traefik-dns.target=192.168.1.50"
+  - "docker-traefik-dns.proxy=true"
 ```
+
+## Safety / 安全机制
+
+The service writes ownership TXT records and only updates or deletes records it owns.
+
+本服务会写入所有权 TXT 记录，并且只更新/删除自己创建的记录。
+
+This prevents accidental deletion of manually managed DNS records.
+
+这样可以避免误删手工管理的 DNS 记录。
+
+## Notes / 说明
+
+- Designed for self-hosted Docker and Traefik / 适用于自托管 Docker 和 Traefik
+- Best used with Traefik routes / 最适合和 Traefik 路由配合使用
+- `DNS_SOURCE` supports `docker`, `traefik`, or `both` / `DNS_SOURCE` 支持 `docker`、`traefik`、`both`
+- `DRY_RUN=true` is useful before enabling automatic updates / 在开启自动更新前，可先用 `DRY_RUN=true` 验证
+
+## License / 许可证
+
+MIT
